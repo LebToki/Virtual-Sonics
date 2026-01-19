@@ -47,8 +47,9 @@ const AudioLab: React.FC = () => {
   const [metadata, setMetadata] = useState<AudioMetadata | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Peak Meters simulation state
+  // Spectral Data states
   const [peakLevels, setPeakLevels] = useState<number[]>([]);
+  const [frequencyLevels, setFrequencyLevels] = useState<number[][]>([]); // [stems][bands]
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -56,6 +57,7 @@ const AudioLab: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const trackDuration = 180; // Simulated 3 minute track
+  const EQ_BANDS = 8;
 
   // Simulated waveform data for each stem
   const stemWaveforms = useMemo(() => {
@@ -66,20 +68,33 @@ const AudioLab: React.FC = () => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [processingLog]);
 
-  // Peak Meter & Pitch Correction Simulation Loop
+  // Peak Meter, Spectral EQ & Pitch Correction Simulation Loop
   useEffect(() => {
     let interval: number;
     if (playbackStatus === 'PLAYING') {
       interval = window.setInterval(() => {
-        setPeakLevels(stems.map((stem) => {
-          if (!isStemActive(stem)) return 0;
+        const newFreqLevels: number[][] = [];
+        
+        setPeakLevels(stems.map((stem, stemIdx) => {
+          if (!isStemActive(stem)) {
+            newFreqLevels[stemIdx] = Array(EQ_BANDS).fill(0);
+            return 0;
+          }
           let effectiveVol = stem.volume;
           // Apply reference volume logic for peak visualization
           if (isVocalReference && (stem.name.toLowerCase().includes('vocal') || stem.id === '1')) {
             effectiveVol = Math.max(15, stem.volume * 0.2);
           }
+          
+          // Generate Spectral EQ bands simulation
+          newFreqLevels[stemIdx] = Array.from({ length: EQ_BANDS }, () => 
+            Math.random() * (effectiveVol / 100) * (0.4 + Math.random() * 0.6)
+          );
+          
           return Math.random() * (effectiveVol / 100);
         }));
+
+        setFrequencyLevels(newFreqLevels);
 
         if (isAutoTuneActive) {
           setPitchCorrectionDelta((Math.random() - 0.5) * 40); // -20 to +20 cents jitter
@@ -89,6 +104,7 @@ const AudioLab: React.FC = () => {
       }, 100);
     } else {
       setPeakLevels(stems.map(() => 0));
+      setFrequencyLevels(stems.map(() => Array(EQ_BANDS).fill(0)));
       setPitchCorrectionDelta(0);
     }
     return () => clearInterval(interval);
@@ -582,29 +598,43 @@ const AudioLab: React.FC = () => {
                   const active = isVocalReference && isVocalStem ? true : isStemActive(stem);
                   const isSoloed = soloedIds.includes(stem.id);
                   const currentPeak = peakLevels[idx] || 0;
+                  const currentFreqs = frequencyLevels[idx] || Array(EQ_BANDS).fill(0);
                   
                   // Reference mode volume override
                   const displayVolume = (isVocalReference && isVocalStem) ? Math.max(20, stem.volume * 0.25) : stem.volume;
 
                   return (
                     <div key={stem.id} className={`flex h-32 border-b border-white/5 transition-all group/track ${active ? 'bg-white/[0.02]' : 'bg-black/40 opacity-40'}`}>
-                      {/* TRACK CONTROLS */}
+                      {/* TRACK CONTROLS & SPECTRAL EQ */}
                       <div className="w-72 border-r border-white/10 p-4 space-y-3 bg-black/40 flex flex-col justify-center relative">
                         {isVocalReference && isVocalStem && (
                           <div className="absolute top-2 right-2 px-2 py-0.5 bg-blue-500/20 border border-blue-500/40 rounded text-[7px] mono text-blue-400 font-bold animate-pulse">REF_MODE</div>
                         )}
                         <div className="flex justify-between items-start">
                           <div className="flex items-center gap-3">
-                             {/* Peak Meter Visualizer */}
-                             <div className="w-1.5 h-10 bg-white/5 rounded-full overflow-hidden flex flex-col justify-end">
-                                <div 
-                                  className={`w-full bg-${stem.color} transition-all duration-100 rounded-full`} 
-                                  style={{ height: `${currentPeak * 100}%`, opacity: active ? 1 : 0.2 }}
-                                />
+                             {/* Spectral Visualizer (Vertical Peak + Horizontal EQ) */}
+                             <div className="flex gap-1.5 items-center">
+                                {/* Peak Meter */}
+                                <div className="w-1.5 h-10 bg-white/5 rounded-full overflow-hidden flex flex-col justify-end">
+                                   <div 
+                                     className={`w-full bg-${stem.color} transition-all duration-100 rounded-full`} 
+                                     style={{ height: `${currentPeak * 100}%`, opacity: active ? 1 : 0.2 }}
+                                   />
+                                </div>
+                                {/* Spectral EQ Map */}
+                                <div className="flex gap-[2px] items-end h-10 w-16 bg-white/[0.02] p-1 rounded-md border border-white/5">
+                                   {currentFreqs.map((freq, bIdx) => (
+                                     <div 
+                                       key={bIdx}
+                                       className={`flex-1 bg-${stem.color} transition-all duration-150 rounded-sm`}
+                                       style={{ height: `${freq * 100}%`, opacity: active ? (0.3 + freq * 0.7) : 0.1 }}
+                                     />
+                                   ))}
+                                </div>
                              </div>
                              <div>
-                                <p className="text-xs font-bold uppercase truncate max-w-[120px]">{stem.name}</p>
-                                <p className={`text-[8px] mono uppercase font-bold text-${stem.color} opacity-60`}>Neural_{stem.id}</p>
+                                <p className="text-xs font-bold uppercase truncate max-w-[80px]">{stem.name}</p>
+                                <p className={`text-[8px] mono uppercase font-bold text-${stem.color} opacity-60 tracking-tighter`}>Neural_{stem.id}</p>
                              </div>
                           </div>
                           <div className="flex gap-1">
@@ -657,7 +687,7 @@ const AudioLab: React.FC = () => {
                               key={i} 
                               className={`flex-1 min-w-[2px] rounded-full transition-all duration-500 bg-${stem.color} ${active ? 'opacity-40' : 'opacity-5'}`} 
                               style={{ 
-                                height: `${val * (displayVolume / 100) * (playbackStatus === 'PLAYING' && active ? (Math.random() * 0.4 + 0.8) : 1) * 100}%` 
+                                height: `${val * (displayVolume / 100) * (playbackStatus === 'PLAYING' && active ? (0.8 + Math.random() * 0.4) : 1) * 100}%` 
                               }} 
                             />
                           ))}
@@ -682,7 +712,7 @@ const AudioLab: React.FC = () => {
                    <span className="text-[9px] mono text-white/20 uppercase tracking-widest">Master Logic</span>
                    <div className="flex items-center gap-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="text-[10px] mono text-white/60 font-bold uppercase tracking-tighter">Vocal_Correction_v2.0_Active</span>
+                      <span className="text-[10px] mono text-white/60 font-bold uppercase tracking-tighter">Spectral_Correction_v2.5_Engaged</span>
                    </div>
                 </div>
                 <div className="flex items-center gap-6">
