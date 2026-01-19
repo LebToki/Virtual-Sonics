@@ -49,6 +49,7 @@ const AudioLab: React.FC = () => {
 
   // Spectral Data states
   const [peakLevels, setPeakLevels] = useState<number[]>([]);
+  const [rmsLevels, setRmsLevels] = useState<number[]>([]);
   const [frequencyLevels, setFrequencyLevels] = useState<number[][]>([]); // [stems][bands]
 
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -57,7 +58,7 @@ const AudioLab: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const trackDuration = 180; // Simulated 3 minute track
-  const EQ_BANDS = 8;
+  const EQ_BANDS = 12; // Increased for more detail
 
   // Simulated waveform data for each stem
   const stemWaveforms = useMemo(() => {
@@ -74,10 +75,12 @@ const AudioLab: React.FC = () => {
     if (playbackStatus === 'PLAYING') {
       interval = window.setInterval(() => {
         const newFreqLevels: number[][] = [];
+        const newRms: number[] = [];
         
-        setPeakLevels(stems.map((stem, stemIdx) => {
+        const newPeaks = stems.map((stem, stemIdx) => {
           if (!isStemActive(stem)) {
             newFreqLevels[stemIdx] = Array(EQ_BANDS).fill(0);
+            newRms[stemIdx] = 0;
             return 0;
           }
           let effectiveVol = stem.volume;
@@ -86,14 +89,21 @@ const AudioLab: React.FC = () => {
             effectiveVol = Math.max(15, stem.volume * 0.2);
           }
           
-          // Generate Spectral EQ bands simulation
-          newFreqLevels[stemIdx] = Array.from({ length: EQ_BANDS }, () => 
-            Math.random() * (effectiveVol / 100) * (0.4 + Math.random() * 0.6)
-          );
-          
-          return Math.random() * (effectiveVol / 100);
-        }));
+          const rawPeak = Math.random() * (effectiveVol / 100);
+          newRms[stemIdx] = rawPeak * (0.6 + Math.random() * 0.2); // Simulated RMS is always lower than Peak
 
+          // Generate Spectral EQ bands simulation
+          newFreqLevels[stemIdx] = Array.from({ length: EQ_BANDS }, (_, bIdx) => {
+             // Basic frequency weighting simulation (bass usually higher amplitude)
+             const weighting = 1.0 - (bIdx / EQ_BANDS) * 0.4;
+             return Math.random() * (effectiveVol / 100) * weighting * (0.3 + Math.random() * 0.7);
+          });
+          
+          return rawPeak;
+        });
+
+        setPeakLevels(newPeaks);
+        setRmsLevels(newRms);
         setFrequencyLevels(newFreqLevels);
 
         if (isAutoTuneActive) {
@@ -101,9 +111,10 @@ const AudioLab: React.FC = () => {
         } else {
           setPitchCorrectionDelta(0);
         }
-      }, 100);
+      }, 80); // Slightly faster for smoother LED feel
     } else {
       setPeakLevels(stems.map(() => 0));
+      setRmsLevels(stems.map(() => 0));
       setFrequencyLevels(stems.map(() => Array(EQ_BANDS).fill(0)));
       setPitchCorrectionDelta(0);
     }
@@ -512,17 +523,6 @@ const AudioLab: React.FC = () => {
                   Export All Stems ({audioFormat})
                 </button>
               </div>
-
-              <div className="pt-4 border-t border-white/5">
-                <label className="text-[8px] mono text-white/30 uppercase px-2">Meta Export</label>
-                <button 
-                  onClick={handleExportLyrics}
-                  disabled={!metadata?.lyrics || isExporting}
-                  className="w-full mt-2 py-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-black uppercase tracking-widest text-[9px] rounded-xl hover:bg-emerald-500/20 disabled:opacity-20 transition-all"
-                >
-                  Export Lyrics (SRT)
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -550,8 +550,8 @@ const AudioLab: React.FC = () => {
             <div className="h-full flex flex-col">
               {/* TIMELINE HEAD */}
               <div className="flex h-10 border-b border-white/10 bg-black/40">
-                <div className="w-72 border-r border-white/10 flex items-center px-6">
-                  <span className="text-[9px] mono text-white/40 uppercase tracking-widest">Track Interface</span>
+                <div className="w-80 border-r border-white/10 flex items-center px-6">
+                  <span className="text-[9px] mono text-white/40 uppercase tracking-widest">Spectral Track Interface</span>
                 </div>
                 <div className="flex-1 relative cursor-crosshair overflow-x-hidden" onClick={handleTimelineSeek}>
                   {/* RULER */}
@@ -569,7 +569,7 @@ const AudioLab: React.FC = () => {
               {/* MASTER ANALYSIS TRACK - KEY DISPLAY */}
               {metadata && (
                 <div className="flex h-12 border-b border-white/10 bg-white/[0.02] transition-all group/analysis">
-                  <div className="w-72 border-r border-white/10 p-4 py-3 flex items-center gap-2 bg-emerald-500/5">
+                  <div className="w-80 border-r border-white/10 p-4 py-3 flex items-center gap-2 bg-emerald-500/5">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
                     <span className="text-[9px] mono text-emerald-400 font-bold uppercase tracking-widest">Harmonic Track</span>
                     <span className="ml-auto text-[10px] font-black italic text-emerald-300">{metadata.key}</span>
@@ -598,54 +598,88 @@ const AudioLab: React.FC = () => {
                   const active = isVocalReference && isVocalStem ? true : isStemActive(stem);
                   const isSoloed = soloedIds.includes(stem.id);
                   const currentPeak = peakLevels[idx] || 0;
+                  const currentRms = rmsLevels[idx] || 0;
                   const currentFreqs = frequencyLevels[idx] || Array(EQ_BANDS).fill(0);
                   
                   // Reference mode volume override
                   const displayVolume = (isVocalReference && isVocalStem) ? Math.max(20, stem.volume * 0.25) : stem.volume;
 
                   return (
-                    <div key={stem.id} className={`flex h-32 border-b border-white/5 transition-all group/track ${active ? 'bg-white/[0.02]' : 'bg-black/40 opacity-40'}`}>
-                      {/* TRACK CONTROLS & SPECTRAL EQ */}
-                      <div className="w-72 border-r border-white/10 p-4 space-y-3 bg-black/40 flex flex-col justify-center relative">
+                    <div key={stem.id} className={`flex h-44 border-b border-white/5 transition-all group/track ${active ? 'bg-white/[0.02]' : 'bg-black/40 opacity-40'}`}>
+                      {/* TRACK CONTROLS & HIGH-FIDELITY VISUALIZERS */}
+                      <div className="w-80 border-r border-white/10 p-5 space-y-4 bg-black/40 flex flex-col justify-center relative">
                         {isVocalReference && isVocalStem && (
                           <div className="absolute top-2 right-2 px-2 py-0.5 bg-blue-500/20 border border-blue-500/40 rounded text-[7px] mono text-blue-400 font-bold animate-pulse">REF_MODE</div>
                         )}
+                        
                         <div className="flex justify-between items-start">
-                          <div className="flex items-center gap-3">
-                             {/* Spectral Visualizer (Vertical Peak + Horizontal EQ) */}
-                             <div className="flex gap-1.5 items-center">
-                                {/* Peak Meter */}
-                                <div className="w-1.5 h-10 bg-white/5 rounded-full overflow-hidden flex flex-col justify-end">
+                          <div className="flex items-center gap-4">
+                             {/* Segmented LED Peak Meter */}
+                             <div className="flex gap-1.5 h-16 w-4 bg-black/60 rounded-sm border border-white/5 p-1 flex-col-reverse items-center justify-start relative group/meter">
+                                {Array.from({ length: 20 }).map((_, segmentIdx) => (
                                    <div 
-                                     className={`w-full bg-${stem.color} transition-all duration-100 rounded-full`} 
-                                     style={{ height: `${currentPeak * 100}%`, opacity: active ? 1 : 0.2 }}
+                                      key={segmentIdx} 
+                                      className={`w-full h-0.5 rounded-sm transition-all duration-75 ${
+                                         currentPeak * 20 > segmentIdx 
+                                         ? (segmentIdx > 17 ? 'bg-red-500' : segmentIdx > 14 ? 'bg-amber-400' : `bg-${stem.color}`) 
+                                         : 'bg-white/5'
+                                      }`}
                                    />
-                                </div>
-                                {/* Spectral EQ Map */}
-                                <div className="flex gap-[2px] items-end h-10 w-16 bg-white/[0.02] p-1 rounded-md border border-white/5">
-                                   {currentFreqs.map((freq, bIdx) => (
-                                     <div 
-                                       key={bIdx}
-                                       className={`flex-1 bg-${stem.color} transition-all duration-150 rounded-sm`}
-                                       style={{ height: `${freq * 100}%`, opacity: active ? (0.3 + freq * 0.7) : 0.1 }}
-                                     />
-                                   ))}
-                                </div>
+                                ))}
+                                {/* RMS indicator overlay */}
+                                <div 
+                                  className="absolute left-1/2 -translate-x-1/2 w-full h-[2px] bg-white transition-all duration-200 z-10 opacity-60" 
+                                  style={{ bottom: `${currentRms * 100}%` }}
+                                />
                              </div>
-                             <div>
-                                <p className="text-xs font-bold uppercase truncate max-w-[80px]">{stem.name}</p>
-                                <p className={`text-[8px] mono uppercase font-bold text-${stem.color} opacity-60 tracking-tighter`}>Neural_{stem.id}</p>
+
+                             <div className="space-y-2">
+                                <div>
+                                   <p className="text-[11px] font-black uppercase truncate max-w-[130px] leading-none">{stem.name}</p>
+                                   <p className={`text-[8px] mono uppercase font-bold text-${stem.color} opacity-60 tracking-tighter`}>Neural_Core_{stem.id}</p>
+                                </div>
+                                {/* Numerical Peak/RMS Readout */}
+                                <div className="flex gap-2 text-[8px] mono text-white/40 border-t border-white/5 pt-2">
+                                   <div className="flex flex-col">
+                                      <span className="text-[6px] uppercase tracking-tighter">Peak</span>
+                                      <span className={currentPeak > 0.9 ? 'text-red-400' : 'text-white'}>-{( (1 - currentPeak) * 60).toFixed(1)} dB</span>
+                                   </div>
+                                   <div className="flex flex-col">
+                                      <span className="text-[6px] uppercase tracking-tighter">RMS</span>
+                                      <span>-{( (1 - currentRms) * 72).toFixed(1)} dB</span>
+                                   </div>
+                                </div>
                              </div>
                           </div>
+
                           <div className="flex gap-1">
                             <button 
                               onClick={() => setSoloedIds(prev => prev.includes(stem.id) ? prev.filter(id => id !== stem.id) : [...prev, stem.id])} 
-                              className={`w-7 h-7 rounded-lg text-[9px] mono font-black border transition-all ${isSoloed ? 'bg-amber-400 border-amber-400 text-black' : 'bg-black/40 border-white/5 text-white/40 hover:border-white/20'}`}
+                              className={`w-8 h-8 rounded-lg text-[10px] mono font-black border transition-all ${isSoloed ? 'bg-amber-400 border-amber-400 text-black' : 'bg-black/40 border-white/5 text-white/40 hover:border-white/20'}`}
                             >S</button>
                             <button 
                               onClick={() => setStems(stems.map(s => s.id === stem.id ? { ...s, muted: !s.muted } : s))} 
-                              className={`w-7 h-7 rounded-lg text-[9px] mono font-black border transition-all ${stem.muted ? 'bg-red-500 border-red-500 text-white' : 'bg-black/40 border-white/5 text-white/40 hover:border-white/20'}`}
+                              className={`w-8 h-8 rounded-lg text-[10px] mono font-black border transition-all ${stem.muted ? 'bg-red-500 border-red-500 text-white' : 'bg-black/40 border-white/5 text-white/40 hover:border-white/20'}`}
                             >M</button>
+                          </div>
+                        </div>
+
+                        {/* Detailed Spectral EQ Bands */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between items-center px-1">
+                             <span className="text-[7px] mono text-white/20 uppercase tracking-[0.2em]">Spectral Dist.</span>
+                             <span className="text-[7px] mono text-white/10">32Hz — 22kHz</span>
+                          </div>
+                          <div className="flex gap-[2px] items-end h-12 w-full bg-black/40 p-1.5 rounded-xl border border-white/10">
+                             {currentFreqs.map((freq, bIdx) => (
+                               <div 
+                                 key={bIdx}
+                                 className={`flex-1 transition-all duration-100 rounded-sm hover:opacity-100 ${
+                                    active ? (freq > 0.8 ? 'bg-white' : `bg-${stem.color}`) : 'bg-white/5'
+                                 }`}
+                                 style={{ height: `${Math.max(2, freq * 100)}%`, opacity: active ? (0.2 + freq * 0.8) : 0.05 }}
+                               />
+                             ))}
                           </div>
                         </div>
                         
@@ -658,7 +692,7 @@ const AudioLab: React.FC = () => {
                               <input 
                                 type="range" min="0" max="100" value={stem.volume} 
                                 onChange={(e) => setStems(stems.map(s => s.id === stem.id ? { ...s, volume: parseInt(e.target.value) } : s))} 
-                                className={`w-full h-1 bg-white/5 accent-${stem.color}`} 
+                                className={`w-full h-1 bg-white/5 accent-${stem.color} cursor-ew-resize`} 
                               />
                            </div>
                            <div className="space-y-1">
@@ -669,7 +703,7 @@ const AudioLab: React.FC = () => {
                               <input 
                                 type="range" min="-100" max="100" step="1" value={stem.pan || 0} 
                                 onChange={(e) => setStems(stems.map(s => s.id === stem.id ? { ...s, pan: parseInt(e.target.value) } : s))} 
-                                className={`w-full h-1 bg-white/5 accent-white`} 
+                                className={`w-full h-1 bg-white/5 accent-white cursor-ew-resize`} 
                               />
                            </div>
                         </div>
@@ -700,7 +734,7 @@ const AudioLab: React.FC = () => {
                 {/* SHARED PLAYHEAD */}
                 <div 
                   className="absolute top-0 bottom-0 w-[2px] bg-white shadow-[0_0_15px_white] z-50 pointer-events-none" 
-                  style={{ left: `calc(${playbackProgress}% + 288px)` }}
+                  style={{ left: `calc(${playbackProgress}% + 320px)` }}
                 >
                   <div className="w-3 h-3 bg-white rotate-45 -translate-x-1/2 -translate-y-1/2 shadow-xl" />
                 </div>
@@ -708,16 +742,20 @@ const AudioLab: React.FC = () => {
               
               {/* DAW BOTTOM BAR */}
               <div className="h-10 border-t border-white/10 bg-black/60 px-8 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                   <span className="text-[9px] mono text-white/20 uppercase tracking-widest">Master Logic</span>
+                <div className="flex items-center gap-6">
                    <div className="flex items-center gap-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="text-[10px] mono text-white/60 font-bold uppercase tracking-tighter">Spectral_Correction_v2.5_Engaged</span>
+                      <span className="text-[10px] mono text-white/60 font-bold uppercase tracking-tighter">Engine_3.1_Full_Spectral_Isolation_Active</span>
+                   </div>
+                   <div className="h-4 w-[1px] bg-white/10" />
+                   <div className="flex gap-4">
+                      <p className="text-[9px] mono text-white/20 uppercase">Sample Rate: <span className="text-white/40">48kHz</span></p>
+                      <p className="text-[9px] mono text-white/20 uppercase">Bit Depth: <span className="text-white/40">32-Bit Floating</span></p>
                    </div>
                 </div>
                 <div className="flex items-center gap-6">
                   <div className="flex items-center gap-2">
-                    <span className="text-[9px] mono text-white/20 uppercase">Scale</span>
+                    <span className="text-[9px] mono text-white/20 uppercase">Timeline Scale</span>
                     <input type="range" min="1" max="5" step="0.1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-24 accent-white h-1 bg-white/10 rounded" />
                   </div>
                   <button onClick={() => alert('Multi-track archive exported.')} className="bg-white text-black px-4 py-1 rounded text-[9px] mono font-black uppercase hover:opacity-80">Export Session</button>
@@ -734,16 +772,16 @@ const AudioLab: React.FC = () => {
                  <div className="grid grid-cols-2 gap-8">
                     <div className="space-y-2">
                       <label className="text-[10px] mono text-white/40 uppercase tracking-widest">Genre Axis</label>
-                      <input type="text" value={genGenre} onChange={(e) => setGenGenre(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-5 py-3 text-sm focus:border-white/40 outline-none" />
+                      <input type="text" value={genGenre} onChange={(e) => setGenGenre(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-6 py-4 text-sm focus:border-white/40 outline-none" />
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] mono text-white/40 uppercase tracking-widest">Emotional Mood</label>
-                      <input type="text" value={genMood} onChange={(e) => setGenMood(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-5 py-3 text-sm focus:border-white/40 outline-none" />
+                      <input type="text" value={genMood} onChange={(e) => setGenMood(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-6 py-4 text-sm focus:border-white/40 outline-none" />
                     </div>
                  </div>
                  <div className="space-y-2">
                     <label className="text-[10px] mono text-white/40 uppercase tracking-widest">Instruments (CSV)</label>
-                    <textarea value={genInstruments} onChange={(e) => setGenInstruments(e.target.value)} rows={2} className="w-full bg-black border border-white/10 rounded-xl px-5 py-3 text-sm focus:border-white/40 outline-none resize-none" />
+                    <textarea value={genInstruments} onChange={(e) => setGenInstruments(e.target.value)} rows={2} className="w-full bg-black border border-white/10 rounded-xl px-6 py-4 text-sm focus:border-white/40 outline-none resize-none" />
                  </div>
                  <button onClick={handleGenerateAISong} disabled={isGenerating} className="w-full py-6 bg-white text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-zinc-200 transition-all shadow-2xl">
                    {isGenerating ? 'Synthesizing...' : 'Initialize DAW Project'}
@@ -760,11 +798,11 @@ const AudioLab: React.FC = () => {
                   <div className="grid grid-cols-2 gap-8">
                     <div className="space-y-3">
                       <label className="text-[10px] mono text-white/40 uppercase tracking-widest">New Genre</label>
-                      <input type="text" value={remapGenre} onChange={(e) => setRemapGenre(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-5 py-4 text-xl font-bold focus:border-white/40 outline-none" />
+                      <input type="text" value={remapGenre} onChange={(e) => setRemapGenre(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-6 py-5 text-xl font-bold focus:border-white/40 outline-none" />
                     </div>
                     <div className="space-y-3">
                       <label className="text-[10px] mono text-white/40 uppercase tracking-widest">New Mood</label>
-                      <input type="text" value={remapMood} onChange={(e) => setRemapMood(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-5 py-4 text-xl font-bold focus:border-white/40 outline-none" />
+                      <input type="text" value={remapMood} onChange={(e) => setRemapMood(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-6 py-5 text-xl font-bold focus:border-white/40 outline-none" />
                     </div>
                   </div>
                   <button onClick={handleNeuralRemap} disabled={isRemapping} className="w-full py-6 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-black uppercase text-xs tracking-[0.4em] rounded-2xl">
