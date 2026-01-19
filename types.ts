@@ -13,6 +13,7 @@ export interface AudioStem {
   volume: number;
   muted: boolean;
   color: string;
+  pan?: number; // -100 (Left) to 100 (Right)
 }
 
 export interface LyricLine {
