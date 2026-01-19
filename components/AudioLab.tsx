@@ -37,6 +37,8 @@ const AudioLab: React.FC = () => {
   const [stems, setStems] = useState<AudioStem[]>([]);
   const [soloedIds, setSoloedIds] = useState<string[]>([]);
   const [isVocalReference, setIsVocalReference] = useState(false);
+  const [isAutoTuneActive, setIsAutoTuneActive] = useState(false);
+  const [pitchCorrectionDelta, setPitchCorrectionDelta] = useState(0);
   
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [pitch, setPitch] = useState(0);
@@ -64,21 +66,33 @@ const AudioLab: React.FC = () => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [processingLog]);
 
-  // Peak Meter Simulation Loop
+  // Peak Meter & Pitch Correction Simulation Loop
   useEffect(() => {
     let interval: number;
     if (playbackStatus === 'PLAYING') {
       interval = window.setInterval(() => {
         setPeakLevels(stems.map((stem) => {
           if (!isStemActive(stem)) return 0;
-          return Math.random() * (stem.volume / 100);
+          let effectiveVol = stem.volume;
+          // Apply reference volume logic for peak visualization
+          if (isVocalReference && (stem.name.toLowerCase().includes('vocal') || stem.id === '1')) {
+            effectiveVol = Math.max(15, stem.volume * 0.2);
+          }
+          return Math.random() * (effectiveVol / 100);
         }));
+
+        if (isAutoTuneActive) {
+          setPitchCorrectionDelta((Math.random() - 0.5) * 40); // -20 to +20 cents jitter
+        } else {
+          setPitchCorrectionDelta(0);
+        }
       }, 100);
     } else {
       setPeakLevels(stems.map(() => 0));
+      setPitchCorrectionDelta(0);
     }
     return () => clearInterval(interval);
-  }, [playbackStatus, stems, soloedIds]);
+  }, [playbackStatus, stems, soloedIds, isVocalReference, isAutoTuneActive]);
 
   // Playback Logic
   useEffect(() => {
@@ -358,6 +372,64 @@ const AudioLab: React.FC = () => {
         {/* MIXER BAR / SIDEBAR CONTROLS */}
         <div className="lg:col-span-3 space-y-6 overflow-y-auto custom-scrollbar pr-2">
           
+          {/* VOCAL REFERENCE & TUNING MODULE */}
+          {metadata && stems.length > 0 && (
+            <div className="bg-white/5 border border-white/10 p-6 rounded-[2rem] space-y-6 animate-in fade-in duration-500">
+              <div className="flex justify-between items-center px-1">
+                <h4 className="text-[10px] mono text-white/40 uppercase tracking-[0.2em]">Neural Vocal Engine</h4>
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+              </div>
+              
+              <div className="space-y-4">
+                {/* Vocal Reference Toggle */}
+                <button 
+                  onClick={() => setIsVocalReference(!isVocalReference)}
+                  className={`w-full p-4 rounded-2xl border transition-all flex items-center justify-between group ${isVocalReference ? 'bg-white text-black border-white' : 'bg-black/40 border-white/10 text-white hover:bg-white/5'}`}
+                >
+                  <div className="text-left">
+                    <p className={`text-[10px] mono uppercase font-bold ${isVocalReference ? 'text-black' : 'text-white/60'}`}>Vocal Reference</p>
+                    <p className={`text-[8px] italic ${isVocalReference ? 'text-black/60' : 'text-white/30'}`}>Background guidance track</p>
+                  </div>
+                  <div className={`w-8 h-8 rounded-full border flex items-center justify-center transition-all ${isVocalReference ? 'bg-black text-white border-black' : 'bg-white/5 border-white/10 group-hover:border-white/40'}`}>
+                    {isVocalReference ? 'ON' : 'OFF'}
+                  </div>
+                </button>
+
+                {/* Auto Tune Toggle */}
+                <button 
+                  onClick={() => setIsAutoTuneActive(!isAutoTuneActive)}
+                  className={`w-full p-4 rounded-2xl border transition-all flex items-center justify-between group ${isAutoTuneActive ? 'bg-emerald-500 text-black border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.3)]' : 'bg-black/40 border-white/10 text-white hover:bg-white/5'}`}
+                >
+                  <div className="text-left">
+                    <p className={`text-[10px] mono uppercase font-bold ${isAutoTuneActive ? 'text-black' : 'text-white/60'}`}>Auto-Tune</p>
+                    <p className={`text-[8px] italic ${isAutoTuneActive ? 'text-black/60' : 'text-white/30'}`}>Neural pitch correction</p>
+                  </div>
+                  <div className={`w-8 h-8 rounded-full border flex items-center justify-center transition-all ${isAutoTuneActive ? 'bg-black text-white border-black' : 'bg-white/5 border-white/10 group-hover:border-white/40'}`}>
+                    {isAutoTuneActive ? 'ON' : 'OFF'}
+                  </div>
+                </button>
+              </div>
+
+              {isAutoTuneActive && playbackStatus === 'PLAYING' && (
+                <div className="bg-black/40 border border-emerald-500/20 p-4 rounded-2xl space-y-2 animate-in slide-in-from-top-2">
+                  <div className="flex justify-between text-[8px] mono text-white/30 uppercase">
+                    <span>Correction Delta</span>
+                    <span className="text-emerald-400">{pitchCorrectionDelta.toFixed(1)} cents</span>
+                  </div>
+                  <div className="h-12 flex items-center justify-center gap-1">
+                    {Array.from({ length: 12 }).map((_, i) => (
+                      <div 
+                        key={i} 
+                        className={`w-1 transition-all duration-100 rounded-full ${Math.abs(pitchCorrectionDelta) > i * 4 ? 'bg-emerald-400' : 'bg-white/10'}`} 
+                        style={{ height: `${Math.max(4, Math.random() * 20)}px` }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* HARMONIC PROFILE - KEY DISPLAY */}
           {metadata && songFile && (
             <div className="bg-white/5 border border-white/10 p-6 rounded-[2rem] space-y-4 animate-in fade-in duration-500 group relative overflow-hidden">
@@ -437,26 +509,6 @@ const AudioLab: React.FC = () => {
               </div>
             </div>
           </div>
-
-          <div className="bg-white/5 border border-white/10 p-6 rounded-[2rem] space-y-4">
-            <h4 className="text-[10px] mono text-white/40 uppercase tracking-[0.2em] px-2">Session Parameters</h4>
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-[8px] mono text-white/20">
-                  <span>Playback Speed</span>
-                  <span>{playbackSpeed}x</span>
-                </div>
-                <input type="range" min="0.5" max="2" step="0.1" value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} className="w-full" />
-              </div>
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-[8px] mono text-white/20">
-                  <span>Global Pitch</span>
-                  <span>{pitch} ST</span>
-                </div>
-                <input type="range" min="-12" max="12" value={pitch} onChange={(e) => setPitch(parseInt(e.target.value))} className="w-full" />
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* VIEWPORT AREA */}
@@ -526,14 +578,21 @@ const AudioLab: React.FC = () => {
               {/* TRACKS AREA */}
               <div className="flex-1 overflow-y-auto custom-scrollbar relative">
                 {stems.map((stem, idx) => {
-                  const active = isStemActive(stem);
+                  const isVocalStem = stem.name.toLowerCase().includes('vocal') || stem.id === '1';
+                  const active = isVocalReference && isVocalStem ? true : isStemActive(stem);
                   const isSoloed = soloedIds.includes(stem.id);
                   const currentPeak = peakLevels[idx] || 0;
+                  
+                  // Reference mode volume override
+                  const displayVolume = (isVocalReference && isVocalStem) ? Math.max(20, stem.volume * 0.25) : stem.volume;
 
                   return (
                     <div key={stem.id} className={`flex h-32 border-b border-white/5 transition-all group/track ${active ? 'bg-white/[0.02]' : 'bg-black/40 opacity-40'}`}>
                       {/* TRACK CONTROLS */}
-                      <div className="w-72 border-r border-white/10 p-4 space-y-3 bg-black/40 flex flex-col justify-center">
+                      <div className="w-72 border-r border-white/10 p-4 space-y-3 bg-black/40 flex flex-col justify-center relative">
+                        {isVocalReference && isVocalStem && (
+                          <div className="absolute top-2 right-2 px-2 py-0.5 bg-blue-500/20 border border-blue-500/40 rounded text-[7px] mono text-blue-400 font-bold animate-pulse">REF_MODE</div>
+                        )}
                         <div className="flex justify-between items-start">
                           <div className="flex items-center gap-3">
                              {/* Peak Meter Visualizer */}
@@ -564,7 +623,7 @@ const AudioLab: React.FC = () => {
                            <div className="space-y-1">
                               <div className="flex justify-between text-[7px] mono text-white/30 uppercase">
                                 <span>Gain</span>
-                                <span>{stem.volume}%</span>
+                                <span>{Math.floor(displayVolume)}%</span>
                               </div>
                               <input 
                                 type="range" min="0" max="100" value={stem.volume} 
@@ -598,7 +657,7 @@ const AudioLab: React.FC = () => {
                               key={i} 
                               className={`flex-1 min-w-[2px] rounded-full transition-all duration-500 bg-${stem.color} ${active ? 'opacity-40' : 'opacity-5'}`} 
                               style={{ 
-                                height: `${val * (stem.volume / 100) * (playbackStatus === 'PLAYING' && active ? (Math.random() * 0.4 + 0.8) : 1) * 100}%` 
+                                height: `${val * (displayVolume / 100) * (playbackStatus === 'PLAYING' && active ? (Math.random() * 0.4 + 0.8) : 1) * 100}%` 
                               }} 
                             />
                           ))}
@@ -623,7 +682,7 @@ const AudioLab: React.FC = () => {
                    <span className="text-[9px] mono text-white/20 uppercase tracking-widest">Master Logic</span>
                    <div className="flex items-center gap-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="text-[10px] mono text-white/60 font-bold uppercase tracking-tighter">Isolation_v3.2_Engine_Loaded</span>
+                      <span className="text-[10px] mono text-white/60 font-bold uppercase tracking-tighter">Vocal_Correction_v2.0_Active</span>
                    </div>
                 </div>
                 <div className="flex items-center gap-6">
