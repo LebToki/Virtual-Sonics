@@ -3,7 +3,8 @@ export enum AppView {
   LAB = 'LAB',
   ARCHITECT = 'ARCHITECT',
   COVER_ART = 'COVER_ART',
-  TRANSCRIBE = 'TRANSCRIBE'
+  TRANSCRIBE = 'TRANSCRIBE',
+  LIVE = 'LIVE'
 }
 
 export interface AudioStem {

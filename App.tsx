@@ -6,6 +6,7 @@ import AudioLab from './components/AudioLab';
 import ProductArchitect from './components/ProductArchitect';
 import CoverCreator from './components/CoverCreator';
 import AudioTranscriber from './components/AudioTranscriber';
+import LiveSession from './components/LiveSession';
 import Header from './components/Header';
 
 const App: React.FC = () => {
@@ -39,6 +40,8 @@ const App: React.FC = () => {
         return <CoverCreator onSelectKey={handleSelectKey} isKeyActive={isApiKeySelected} />;
       case AppView.TRANSCRIBE:
         return <AudioTranscriber />;
+      case AppView.LIVE:
+        return <LiveSession onSelectKey={handleSelectKey} isKeyActive={isApiKeySelected} />;
       default:
         return <AudioLab />;
     }

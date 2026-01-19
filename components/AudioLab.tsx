@@ -1,13 +1,14 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { AudioStem, AudioMetadata, LyricLine } from '../types';
+import { GoogleGenAI } from '@google/genai';
 import GuitarTuner from './GuitarTuner';
 
-type LabModule = 'STEMS' | 'TUNER' | 'KARAOKE';
+type LabModule = 'DAW' | 'TUNER' | 'KARAOKE' | 'GENERATOR' | 'EXPLORER';
 type PlaybackStatus = 'PLAYING' | 'PAUSED' | 'STOPPED';
 
 const AudioLab: React.FC = () => {
-  const [activeModule, setActiveModule] = useState<LabModule>('STEMS');
+  const [activeModule, setActiveModule] = useState<LabModule>('DAW');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [processingStatus, setProcessingStatus] = useState('');
@@ -16,37 +17,45 @@ const AudioLab: React.FC = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [exportFormat, setExportFormat] = useState<'MP3' | 'WAV' | 'SRT'>('MP3');
   const [songFile, setSongFile] = useState<File | null>(null);
+  const [isProjectGenerated, setIsProjectGenerated] = useState(false);
   
+  // Generator & Explorer States
+  const [genGenre, setGenGenre] = useState('Cyber-Synth');
+  const [genMood, setGenMood] = useState('Cinematic');
+  const [genInstruments, setGenInstruments] = useState('Synthesizers, Industrial Drums, Pulsing Bass');
+  const [isGenerating, setIsGenerating] = useState(false);
+  
+  const [remapGenre, setRemapGenre] = useState('Dark Jazz');
+  const [remapMood, setRemapMood] = useState('Noir');
+  const [isRemapping, setIsRemapping] = useState(false);
+
   // Playback System
   const [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>('STOPPED');
   const [playbackProgress, setPlaybackProgress] = useState(0); // 0 to 100
   const playbackTimerRef = useRef<number | null>(null);
 
   const [stems, setStems] = useState<AudioStem[]>([]);
-  const [soloedId, setSoloedId] = useState<string | null>(null);
+  const [soloedIds, setSoloedIds] = useState<string[]>([]);
   const [isVocalReference, setIsVocalReference] = useState(false);
   
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [pitch, setPitch] = useState(0);
+  const [isolationThreshold, setIsolationThreshold] = useState(75); // 0 to 100
+  const [zoom, setZoom] = useState(1.5);
   const [metadata, setMetadata] = useState<AudioMetadata | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Zoom and Pan States
-  const [zoom, setZoom] = useState(1);
-  const waveformContainerRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [startX, setStartX] = useState(0);
-  const [scrollLeft, setScrollLeft] = useState(0);
-  
+  const lyricsContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Simulation parameters
   const trackDuration = 180; // Simulated 3 minute track
 
-  const masterWaveformData = useMemo(() => {
-    return Array.from({ length: 500 }, () => Math.random() * 0.8 + 0.1);
-  }, [songFile]);
+  // Simulated waveform data for each stem
+  const stemWaveforms = useMemo(() => {
+    return stems.map(() => Array.from({ length: 300 }, () => Math.random() * 0.7 + 0.1));
+  }, [stems.length, songFile, isProjectGenerated]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -89,350 +98,428 @@ const AudioLab: React.FC = () => {
     setPlaybackProgress(0);
   };
 
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!waveformContainerRef.current || isProcessing) return;
-    const rect = waveformContainerRef.current.getBoundingClientRect();
-    const clickX = e.clientX - rect.left + waveformContainerRef.current.scrollLeft;
-    const totalWidth = waveformContainerRef.current.scrollWidth;
-    const seekPercentage = (clickX / totalWidth) * 100;
-    setPlaybackProgress(Math.max(0, Math.min(100, seekPercentage)));
+  const jumpToTime = (time: number) => {
+    if (isProcessing) return;
+    const newProgress = (time / trackDuration) * 100;
+    setPlaybackProgress(Math.max(0, Math.min(100, newProgress)));
     if (playbackStatus === 'STOPPED') setPlaybackStatus('PAUSED');
+  };
+
+  const handleTimelineSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!timelineRef.current || isProcessing) return;
+    const rect = timelineRef.current.getBoundingClientRect();
+    const clickX = e.clientX - rect.left + timelineRef.current.scrollLeft;
+    const totalWidth = timelineRef.current.scrollWidth;
+    const seekPercentage = (clickX / totalWidth) * 100;
+    jumpToTime((seekPercentage / 100) * trackDuration);
+  };
+
+  const saveProjectToLocal = () => {
+    if (!songFile) return;
+    const projectState = {
+      stems,
+      soloedIds,
+      metadata,
+      playbackSpeed,
+      pitch,
+      isolationThreshold,
+      isProjectGenerated,
+      songFileName: songFile.name,
+      timestamp: Date.now()
+    };
+    localStorage.setItem('vs_project_cache', JSON.stringify(projectState));
+    setProcessingLog(prev => [...prev, `[STORAGE] State captured to local node.`]);
+  };
+
+  const loadProjectFromLocal = () => {
+    const saved = localStorage.getItem('vs_project_cache');
+    if (saved) {
+      try {
+        const state = JSON.parse(saved);
+        setStems(state.stems);
+        setSoloedIds(state.soloedIds || []);
+        setMetadata(state.metadata);
+        setPlaybackSpeed(state.playbackSpeed);
+        setPitch(state.pitch);
+        setIsolationThreshold(state.isolationThreshold);
+        setIsProjectGenerated(state.isProjectGenerated);
+        setSongFile({ name: state.songFileName } as File);
+        setActiveModule('DAW');
+      } catch (err) {
+        console.error("Restore failed", err);
+      }
+    }
+  };
+
+  const handleNeuralRemap = async () => {
+    if (!metadata || !stems.length) return;
+    setIsRemapping(true);
+    setProcessingProgress(0);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const prompt = `Neural Remix Engineer: Remap "${metadata.lyrics?.map(l => l.text).join(' ')}" to ${remapGenre}/${remapMood}. Return JSON: { "newBpm": number, "newKey": string, "newStems": string[] }.`;
+      const response = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: prompt, config: { responseMimeType: "application/json" } });
+      const data = JSON.parse(response.text || '{}');
+      setMetadata(prev => prev ? ({ ...prev, bpm: data.newBpm || prev.bpm, key: data.newKey || prev.key }) : null);
+      const newStems: AudioStem[] = [
+        stems.find(s => s.name.includes('Vocals')) || stems[0],
+        ...(data.newStems || []).map((name: string, i: number) => ({ id: (i + 2).toString(), name, volume: 80, muted: false, color: ['blue-400', 'amber-400', 'purple-400'][i % 3] }))
+      ];
+      setStems(newStems);
+      setSoloedIds([]);
+      setActiveModule('DAW');
+    } catch (err) { console.error(err); } finally { setIsRemapping(false); }
+  };
+
+  const handleGenerateAISong = async () => {
+    setIsGenerating(true);
+    setProcessingProgress(0);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `AI Music Producer: Genre: ${genGenre}, Mood: ${genMood}, Instruments: ${genInstruments}. Return JSON with track title, BPM, Key, and 6 lines of lyrics.`,
+        config: { responseMimeType: "application/json" }
+      });
+      const data = JSON.parse(response.text || '{}');
+      setMetadata({
+        bpm: data.bpm || 120, key: data.key || 'Cmaj', chords: ['C', 'G', 'Am', 'F'],
+        lyrics: (data.lyrics || []).map((text: string, i: number) => ({ time: i * 8 + 4, text }))
+      });
+      const instrumentList = genInstruments.split(',').map(s => s.trim());
+      setStems([
+        { id: '1', name: 'Neural Vocals', volume: 80, muted: false, color: 'emerald-400' },
+        { id: '2', name: instrumentList[0] || 'Lead Synth', volume: 90, muted: false, color: 'blue-400' },
+        { id: '3', name: instrumentList[1] || 'Drum Kit', volume: 85, muted: false, color: 'amber-400' },
+        { id: '4', name: instrumentList[2] || 'Sub Bass', volume: 75, muted: false, color: 'purple-400' },
+      ]);
+      setSoloedIds([]);
+      setIsProjectGenerated(true);
+      setSongFile({ name: `${data.title || 'AI_GENERATED'}.vsonic` } as File);
+      setActiveModule('DAW');
+    } catch (err) { console.error(err); } finally { setIsGenerating(false); }
   };
 
   const simulateProcessing = () => {
     setIsProcessing(true);
     setProcessingProgress(0);
-    setProcessingLog([]);
-    setError(null);
-    
-    const statuses = [
-      "Initializing Neural Core...",
-      "Decomposing Spectral Latency...",
-      "Isolating Vocal Stems (Whisper V3)...",
-      "Transcribing Lexical Cues...",
-      "Generating Karaoke Sync Markers...",
-      "Mapping Harmonic Flux...",
-      "Finalizing Karaoke Package..."
-    ];
-
-    let lastLogIndex = -1;
+    let p = 0;
     const interval = setInterval(() => {
-      setProcessingProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          finishProcessing();
-          return 100;
-        }
-        const logIndex = Math.floor(prev / (100 / statuses.length));
-        if (logIndex !== lastLogIndex && logIndex < statuses.length) {
-          const newStatus = statuses[logIndex];
-          setProcessingStatus(newStatus);
-          setProcessingLog(cur => [...cur, `[SYSTEM] ${newStatus}`]);
-          lastLogIndex = logIndex;
-        }
-        return prev + 1;
-      });
-    }, 30);
+      p += 2;
+      setProcessingProgress(p);
+      if (p >= 100) {
+        clearInterval(interval);
+        finishProcessing();
+      }
+    }, 40);
   };
 
   const finishProcessing = () => {
     setMetadata({ 
-      bpm: 124, 
-      key: 'Bm',
-      chords: ['Bm', 'G', 'D', 'A', 'Em7', 'F#m'],
+      bpm: 124, key: 'Bm', chords: ['Bm', 'G', 'D', 'A'],
       lyrics: [
-        { time: 5, text: "Welcome to the Virtual Sonics experience" },
-        { time: 10, text: "Neural separation in the palm of your hand" },
-        { time: 15, text: "Isolate the voice, feel the rhythm" },
-        { time: 20, text: "Whisper transcribing every word you say" },
-        { time: 25, text: "This is the future of audio architecture" },
-        { time: 30, text: "Break it down, build it up again" },
-        { time: 40, text: "[Guitar Solo - Neural Reconstruction Active]" },
-        { time: 55, text: "Can you hear the layers? Pure isolation." },
+        { time: 5, text: "Spectral isolation complete" },
+        { time: 12, text: "Multitrack reconstruction active" },
+        { time: 20, text: "Feel the neural resonance" },
+        { time: 28, text: "Breaking down the signal path" },
       ]
     });
     setStems([
-      { id: '1', name: 'Vocals', volume: 100, muted: false, color: 'emerald-400' },
-      { id: '2', name: 'Instruments', volume: 90, muted: false, color: 'blue-400' },
-      { id: '3', name: 'Drums', volume: 80, muted: false, color: 'amber-400' },
-      { id: '4', name: 'Bass', volume: 75, muted: false, color: 'purple-400' },
+      { id: '1', name: 'Isolated Vocals', volume: 0, muted: false, color: 'emerald-400' },
+      { id: '2', name: 'Guitars / Keys', volume: 90, muted: false, color: 'blue-400' },
+      { id: '3', name: 'Percussion', volume: 80, muted: false, color: 'amber-400' },
+      { id: '4', name: 'Bass Line', volume: 75, muted: false, color: 'purple-400' },
     ]);
+    setSoloedIds([]);
     setIsProcessing(false);
   };
 
-  const currentLyric = useMemo(() => {
-    if (!metadata?.lyrics) return null;
-    const currentTime = (playbackProgress / 100) * trackDuration;
-    return [...metadata.lyrics].reverse().find(l => l.time <= currentTime);
-  }, [metadata, playbackProgress]);
-
-  const toggleVocalReference = () => {
-    const newVal = !isVocalReference;
-    setIsVocalReference(newVal);
-    setStems(stems.map(s => s.name === 'Vocals' ? { ...s, volume: newVal ? 30 : 0 } : s));
-  };
-
   const isStemActive = (stem: AudioStem) => {
-    if (soloedId) return soloedId === stem.id;
+    if (soloedIds.length > 0) return soloedIds.includes(stem.id);
     return !stem.muted;
   };
 
+  const currentLyricIndex = useMemo(() => {
+    if (!metadata?.lyrics) return -1;
+    const time = (playbackProgress / 100) * trackDuration;
+    return metadata.lyrics.findIndex((l, i) => l.time <= time && (metadata.lyrics![i+1]?.time > time || i === metadata.lyrics!.length - 1));
+  }, [metadata, playbackProgress]);
+
   return (
-    <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-700 pb-20">
-      <section className="flex flex-col gap-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 border-b border-white/5 pb-8">
-          <div>
-            <h2 className="text-5xl font-black tracking-tighter uppercase italic bg-gradient-to-r from-white to-white/40 bg-clip-text text-transparent">Audio Lab</h2>
-            <p className="text-white/40 mt-2 max-w-xl font-medium uppercase text-[10px] mono tracking-[0.2em]">Neural Processing • Stem Isolation • Karaoke Engine</p>
+    <div className="max-w-7xl mx-auto space-y-6 h-full flex flex-col pb-10">
+      {/* DAW MASTER BAR */}
+      <div className="flex items-center justify-between bg-white/[0.03] border border-white/10 rounded-2xl p-4 px-8 sticky top-0 z-50 backdrop-blur-xl">
+        <div className="flex items-center gap-8">
+          <div className="flex gap-1.5">
+            <button onClick={togglePlayback} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${playbackStatus === 'PLAYING' ? 'bg-red-500 text-white' : 'bg-white text-black'}`}>
+              {playbackStatus === 'PLAYING' ? '||' : '▶'}
+            </button>
+            <button onClick={stopPlayback} className="w-10 h-10 rounded-full bg-white/5 text-white flex items-center justify-center border border-white/10">■</button>
           </div>
           
-          <div className="flex items-center gap-2 p-1.5 bg-white/5 border border-white/10 rounded-2xl">
-             {(['STEMS', 'KARAOKE', 'TUNER'] as LabModule[]).map((m) => (
-                <button 
-                  key={m}
-                  onClick={() => setActiveModule(m)}
-                  className={`px-6 py-2.5 text-[10px] mono uppercase font-bold rounded-xl transition-all ${activeModule === m ? 'bg-white text-black shadow-lg shadow-white/10' : 'text-white/40 hover:text-white'}`}
-                >
-                  {m.replace('_', ' ')}
-                </button>
-             ))}
+          <div className="flex items-center gap-6">
+            <div className="text-center">
+              <p className="text-[8px] mono text-white/30 uppercase">Time</p>
+              <p className="text-sm mono font-bold">
+                {Math.floor(((playbackProgress / 100) * trackDuration) / 60)}:
+                {Math.floor(((playbackProgress / 100) * trackDuration) % 60).toString().padStart(2, '0')}
+              </p>
+            </div>
+            <div className="h-6 w-px bg-white/10" />
+            <div className="text-center">
+              <p className="text-[8px] mono text-white/30 uppercase">Tempo</p>
+              <p className="text-sm mono font-bold text-blue-400">{metadata?.bpm || '--'}</p>
+            </div>
+            <div className="h-6 w-px bg-white/10" />
+            <div className="text-center">
+              <p className="text-[8px] mono text-white/30 uppercase">Key</p>
+              <p className="text-sm mono font-bold text-emerald-400">{metadata?.key || '--'}</p>
+            </div>
           </div>
         </div>
 
-        {!songFile ? (
+        <div className="flex items-center gap-4">
+          <div className="flex bg-white/5 border border-white/10 rounded-xl p-1">
+             {(['DAW', 'KARAOKE', 'GENERATOR', 'EXPLORER', 'TUNER'] as LabModule[]).map(m => (
+               <button 
+                key={m} 
+                onClick={() => setActiveModule(m)} 
+                className={`px-4 py-1.5 text-[9px] mono uppercase font-bold rounded-lg transition-all ${activeModule === m ? 'bg-white text-black shadow-lg shadow-white/5' : 'text-white/40 hover:text-white'}`}
+               >
+                 {m}
+               </button>
+             ))}
+          </div>
+          <div className="h-6 w-px bg-white/10" />
+          <div className="flex gap-2">
+            <button onClick={saveProjectToLocal} className="p-2 px-4 rounded-xl text-[9px] mono uppercase font-bold border border-white/10 bg-white/5 hover:bg-white/10 transition-all">Save</button>
+            <button onClick={loadProjectFromLocal} className="p-2 px-4 rounded-xl text-[9px] mono uppercase font-bold border border-white/10 bg-white/5 hover:bg-white/10 transition-all">Load</button>
+          </div>
+        </div>
+      </div>
+
+      {/* VIEWPORT AREA */}
+      <div className="flex-1 min-h-0 overflow-hidden rounded-[2.5rem] border border-white/5 bg-[#080808]">
+        {!songFile && activeModule !== 'GENERATOR' ? (
           <div 
             onClick={() => fileInputRef.current?.click()}
-            className="group h-[500px] border-2 border-dashed border-white/5 bg-white/[0.02] rounded-[3rem] flex flex-col items-center justify-center gap-6 cursor-pointer hover:bg-white/[0.04] hover:border-white/20 transition-all duration-700 relative overflow-hidden"
+            className="w-full h-full flex flex-col items-center justify-center gap-8 cursor-pointer hover:bg-white/[0.02] transition-all group"
           >
-            <div className="absolute inset-0 bg-gradient-to-b from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-            <div className="w-24 h-24 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-hover:scale-110 group-hover:bg-white/10 transition-all duration-500 relative z-10">
-              <span className="text-4xl text-white/20 group-hover:text-white/60 transition-colors">↑</span>
+            <div className="w-24 h-24 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-hover:scale-110 transition-all">
+              <span className="text-4xl opacity-20 group-hover:opacity-60 transition-opacity">↑</span>
             </div>
-            <div className="text-center space-y-2 relative z-10">
-              <p className="text-2xl font-bold tracking-tight">Drop Audio for Multi-Track Analysis</p>
-              <p className="text-white/40 mono text-xs uppercase tracking-widest italic">Supports AI Isolation & Transcribe</p>
+            <div className="text-center">
+              <h3 className="text-2xl font-bold tracking-tight">Drop Audio to Initialize Timeline</h3>
+              <p className="text-white/40 mono text-xs uppercase tracking-widest mt-2">Or Navigate to Generator for AI Synthesis</p>
             </div>
             <input type="file" className="hidden" ref={fileInputRef} onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) { setSongFile(file); simulateProcessing(); }
             }} accept="audio/*" />
           </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* MIXER & CONTROL PANEL */}
-            <div className="lg:col-span-3 space-y-6">
-              <div className="bg-white/5 border border-white/10 p-6 rounded-[2rem] space-y-8">
-                <div className="flex justify-between items-center text-[10px] mono text-white/40 uppercase">
-                  <span>Track ID</span>
-                  <button onClick={() => { setSongFile(null); setStems([]); setMetadata(null); }} className="text-red-400 hover:text-red-300">Reset</button>
-                </div>
-                <div className="p-4 bg-black/40 rounded-2xl border border-white/5 flex items-center gap-4">
-                  <div className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center text-lg">♫</div>
-                  <div className="overflow-hidden">
-                    <p className="text-xs font-bold truncate">{songFile.name}</p>
-                    <p className="text-[9px] text-white/20 mono uppercase">Active Pipeline</p>
-                  </div>
-                </div>
-
-                {metadata && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 bg-black/40 rounded-xl border border-white/5">
-                      <p className="text-[8px] mono text-white/30 uppercase">BPM</p>
-                      <p className="text-2xl font-black text-blue-400">{metadata.bpm}</p>
-                    </div>
-                    <div className="p-4 bg-black/40 rounded-xl border border-white/5">
-                      <p className="text-[8px] mono text-white/30 uppercase">KEY</p>
-                      <p className="text-2xl font-black text-emerald-400">{metadata.key}</p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-6 pt-4 border-t border-white/5">
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-[10px] mono text-white/40">
-                      <span>Neural Pitch</span>
-                      <span>{pitch} ST</span>
-                    </div>
-                    <input type="range" min="-12" max="12" value={pitch} onChange={(e) => setPitch(parseInt(e.target.value))} className="w-full accent-white" />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-[10px] mono text-white/40">
-                      <span>Speed Scale</span>
-                      <span>{playbackSpeed}x</span>
-                    </div>
-                    <input type="range" min="0.5" max="2" step="0.1" value={playbackSpeed} onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))} className="w-full accent-white" />
-                  </div>
-                </div>
+        ) : activeModule === 'DAW' ? (
+          <div className="h-full flex flex-col">
+            {/* TIMELINE HEAD */}
+            <div className="flex h-10 border-b border-white/10 bg-black/40">
+              <div className="w-64 border-r border-white/10 flex items-center px-6">
+                <span className="text-[9px] mono text-white/40 uppercase tracking-widest">Track Header</span>
               </div>
-
-              <div className="flex flex-col gap-2">
-                <div className="flex p-1.5 bg-white/5 border border-white/10 rounded-2xl">
-                   {(['MP3', 'WAV', 'SRT'] as const).map(f => (
-                     <button key={f} onClick={() => setExportFormat(f)} className={`flex-1 py-3 text-[10px] mono font-bold rounded-xl ${exportFormat === f ? 'bg-white text-black' : 'text-white/40'}`}>{f}</button>
-                   ))}
+              <div className="flex-1 relative cursor-crosshair overflow-x-hidden" onClick={handleTimelineSeek}>
+                {/* RULER */}
+                <div className="flex h-full items-end pb-2 px-8 gap-12" style={{ width: `${100 * zoom}%` }}>
+                  {Array.from({ length: 15 }).map((_, i) => (
+                    <div key={i} className="flex flex-col gap-1 items-start min-w-[40px]">
+                      <span className="text-[7px] mono text-white/20">{i}:{(i*12).toString().padStart(2, '0')}</span>
+                      <div className="h-2 w-px bg-white/20" />
+                    </div>
+                  ))}
                 </div>
-                <button className="w-full py-5 bg-white text-black font-black uppercase tracking-widest text-[10px] rounded-2xl hover:opacity-90">Export {exportFormat} Asset</button>
               </div>
             </div>
 
-            {/* MAIN INTERACTIVE VIEW */}
-            <div className="lg:col-span-9 space-y-6">
-              {/* WAVEFORM & PLAYBACK */}
-              <div className="bg-white/5 border border-white/10 p-8 rounded-[2.5rem] relative overflow-hidden group">
-                <div className="flex justify-between items-center mb-8 relative z-10">
-                  <div className="flex items-center gap-4">
-                    <div className="flex gap-2">
-                      <button onClick={togglePlayback} className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${playbackStatus === 'PLAYING' ? 'bg-red-500 text-white' : 'bg-white text-black'}`}>
-                        {playbackStatus === 'PLAYING' ? '||' : '▶'}
-                      </button>
-                      <button onClick={stopPlayback} className="w-12 h-12 rounded-full bg-white/10 text-white flex items-center justify-center border border-white/10">■</button>
+            {/* TRACKS AREA */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar relative">
+              {stems.map((stem, idx) => {
+                const active = isStemActive(stem);
+                const isSoloed = soloedIds.includes(stem.id);
+                return (
+                  <div key={stem.id} className={`flex h-32 border-b border-white/5 transition-all group/track ${active ? 'bg-white/[0.02]' : 'bg-black/40 opacity-40'}`}>
+                    {/* TRACK CONTROLS */}
+                    <div className="w-64 border-r border-white/10 p-4 space-y-4 bg-black/40">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="text-xs font-bold uppercase truncate max-w-[120px]">{stem.name}</p>
+                          <p className={`text-[8px] mono uppercase font-bold text-${stem.color} opacity-60`}>Neural_{stem.id}</p>
+                        </div>
+                        <div className="flex gap-1">
+                          <button 
+                            onClick={() => setSoloedIds(prev => prev.includes(stem.id) ? prev.filter(id => id !== stem.id) : [...prev, stem.id])} 
+                            className={`w-7 h-7 rounded-lg text-[9px] mono font-black border transition-all ${isSoloed ? 'bg-amber-400 border-amber-400 text-black' : 'bg-black/40 border-white/5 text-white/40 hover:border-white/20'}`}
+                          >S</button>
+                          <button 
+                            onClick={() => setStems(stems.map(s => s.id === stem.id ? { ...s, muted: !s.muted } : s))} 
+                            className={`w-7 h-7 rounded-lg text-[9px] mono font-black border transition-all ${stem.muted ? 'bg-red-500 border-red-500 text-white' : 'bg-black/40 border-white/5 text-white/40 hover:border-white/20'}`}
+                          >M</button>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-[8px] mono text-white/20">
+                          <span>Vol</span>
+                          <span>{stem.volume}%</span>
+                        </div>
+                        <input 
+                          type="range" min="0" max="100" value={stem.volume} 
+                          onChange={(e) => setStems(stems.map(s => s.id === stem.id ? { ...s, volume: parseInt(e.target.value) } : s))} 
+                          className={`w-full h-1 bg-white/5 accent-${stem.color}`} 
+                        />
+                      </div>
                     </div>
-                    <div className="mono text-[10px] text-white/40 uppercase">
-                      {Math.floor((playbackProgress / 100) * trackDuration / 60)}:{Math.floor(((playbackProgress / 100) * trackDuration) % 60).toString().padStart(2, '0')} 
-                      <span className="mx-2">/</span>
-                      03:00
-                    </div>
-                  </div>
-                  
-                  {activeModule === 'KARAOKE' && (
-                    <button 
-                      onClick={toggleVocalReference}
-                      className={`px-4 py-2 rounded-xl text-[9px] mono uppercase font-bold border transition-all ${isVocalReference ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-white/5 border-white/10 text-white/40'}`}
+
+                    {/* TRACK TIMELINE VIEW */}
+                    <div 
+                      className="flex-1 relative overflow-hidden bg-black/20"
+                      ref={timelineRef}
+                      onClick={handleTimelineSeek}
                     >
-                      {isVocalReference ? 'Vocal Ref: ON' : 'Vocal Ref: OFF'}
-                    </button>
-                  )}
-                </div>
-
-                <div 
-                  ref={waveformContainerRef}
-                  onClick={handleSeek}
-                  className="relative h-48 bg-black/40 border border-white/5 rounded-2xl flex items-center overflow-x-auto overflow-y-hidden cursor-crosshair custom-scrollbar-hidden select-none"
-                >
-                  <div className="flex items-center gap-[2px] h-32 px-8" style={{ width: `${100 * zoom}%`, minWidth: '100%' }}>
-                    {masterWaveformData.map((val, i) => {
-                      const past = (i / masterWaveformData.length) * 100 < playbackProgress;
-                      return (
-                        <div key={i} className={`flex-1 min-w-[1px] rounded-full transition-all ${isProcessing ? 'opacity-5 bg-white scale-y-20' : past ? 'bg-emerald-400 opacity-80' : 'bg-white opacity-20'}`} style={{ height: `${val * 100}%` }} />
-                      );
-                    })}
-                  </div>
-                  {!isProcessing && <div className="absolute top-0 bottom-0 w-[2px] bg-emerald-400 shadow-[0_0_15px_emerald] z-20 pointer-events-none" style={{ left: `calc(${playbackProgress}% + 32px)` }} />}
-                  
-                  {isProcessing && (
-                    <div className="absolute inset-0 bg-black/80 backdrop-blur-2xl flex flex-col items-center justify-center z-30 p-10 space-y-6">
-                      <div className="w-full max-w-lg space-y-4">
-                        <div className="flex justify-between text-[10px] mono uppercase text-white/60">
-                          <span>{processingStatus}</span>
-                          <span>{processingProgress}%</span>
-                        </div>
-                        <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/10">
-                          <div className="h-full bg-gradient-to-r from-emerald-500 via-blue-500 to-purple-500" style={{ width: `${processingProgress}%` }} />
-                        </div>
-                        <div className="h-24 bg-black/40 rounded-xl border border-white/5 p-4 overflow-hidden font-mono text-[9px] text-emerald-500/80">
-                           {processingLog.map((log, i) => <div key={i} className="animate-in fade-in slide-in-from-left-2">{log}</div>)}
-                           <div ref={logEndRef} />
-                        </div>
+                      <div className="absolute inset-0 flex items-center px-8 gap-[1px]" style={{ width: `${100 * zoom}%` }}>
+                        {stemWaveforms[idx]?.map((val, i) => (
+                          <div 
+                            key={i} 
+                            className={`flex-1 min-w-[2px] rounded-full transition-all duration-500 bg-${stem.color} ${active ? 'opacity-40' : 'opacity-5'}`} 
+                            style={{ 
+                              height: `${val * (stem.volume / 100) * (playbackStatus === 'PLAYING' && active ? (Math.random() * 0.4 + 0.8) : 1) * 100}%` 
+                            }} 
+                          />
+                        ))}
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                );
+              })}
+
+              {/* SHARED PLAYHEAD */}
+              <div 
+                className="absolute top-0 bottom-0 w-[2px] bg-white shadow-[0_0_15px_white] z-50 pointer-events-none" 
+                style={{ left: `calc(${playbackProgress}% + 256px)` }}
+              >
+                <div className="w-3 h-3 bg-white rotate-45 -translate-x-1/2 -translate-y-1/2 shadow-xl" />
               </div>
-
-              {/* MODULE CONTENT */}
-              {activeModule === 'KARAOKE' ? (
-                <div className="bg-black border border-white/10 rounded-[2.5rem] p-12 min-h-[400px] flex flex-col items-center justify-center text-center space-y-8 relative overflow-hidden">
-                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500/20 to-transparent" />
-                  
-                  <div className="space-y-4 max-w-2xl">
-                    <p className="text-[10px] mono text-white/20 uppercase tracking-[0.4em]">Neural Whisper Pipeline</p>
-                    <div className="relative min-h-[120px] flex items-center justify-center">
-                      <h4 className={`text-6xl font-black italic tracking-tighter transition-all duration-500 ${playbackStatus === 'PLAYING' ? 'text-white scale-100 opacity-100' : 'text-white/10 scale-95 opacity-50'}`}>
-                        {currentLyric ? currentLyric.text : "..."}
-                      </h4>
-                    </div>
-                    {currentLyric && (
-                      <p className="text-emerald-400/40 text-xs mono animate-pulse">
-                        [SYNCED {Math.floor(currentLyric.time)}s]
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="w-full pt-12 border-t border-white/5 flex gap-12 justify-center">
-                     <div className="text-center space-y-2">
-                        <p className="text-[9px] mono text-white/20 uppercase">Confidence</p>
-                        <p className="text-xl font-bold text-white/60">99.8%</p>
-                     </div>
-                     <div className="text-center space-y-2">
-                        <p className="text-[9px] mono text-white/20 uppercase">Latent Delay</p>
-                        <p className="text-xl font-bold text-white/60">12ms</p>
-                     </div>
-                     <div className="text-center space-y-2">
-                        <p className="text-[9px] mono text-white/20 uppercase">Translation</p>
-                        <p className="text-xl font-bold text-white/60">Auto (EN)</p>
-                     </div>
-                  </div>
+            </div>
+            
+            {/* DAW BOTTOM BAR */}
+            <div className="h-10 border-t border-white/10 bg-black/60 px-8 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                 <span className="text-[9px] mono text-white/20 uppercase tracking-widest">Master Logic</span>
+                 <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[10px] mono text-white/60 font-bold uppercase tracking-tighter">Isolation_v3.2_Engine_Loaded</span>
+                 </div>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] mono text-white/20 uppercase">Scale</span>
+                  <input type="range" min="1" max="5" step="0.1" value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} className="w-24 accent-white h-1 bg-white/10 rounded" />
                 </div>
-              ) : activeModule === 'STEMS' ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {stems.map((stem) => {
-                    const active = isStemActive(stem);
-                    const isVisualActive = active && playbackStatus === 'PLAYING';
-                    return (
-                      <div key={stem.id} className={`p-6 rounded-3xl border transition-all duration-500 flex flex-col gap-6 ${active ? 'bg-white/[0.04] border-white/10' : 'bg-black/20 border-white/5 opacity-40'}`}>
-                        <div className="flex justify-between items-start">
-                          <div className="space-y-1">
-                            <p className="text-sm font-black uppercase italic tracking-tight">{stem.name}</p>
-                            <div className={`text-[9px] mono uppercase font-bold text-${stem.color}`}>CH-{stem.id}</div>
-                          </div>
-                          <div className="flex gap-1">
-                            <button onClick={() => setSoloedId(soloedId === stem.id ? null : stem.id)} className={`w-7 h-7 rounded-lg text-[9px] mono font-black border ${soloedId === stem.id ? 'bg-amber-400 border-amber-400 text-black' : 'bg-black/40 border-white/5 text-white/40'}`}>S</button>
-                            <button onClick={() => setStems(stems.map(s => s.id === stem.id ? { ...s, muted: !s.muted } : s))} className={`w-7 h-7 rounded-lg text-[9px] mono font-black border ${stem.muted ? 'bg-red-500 border-red-500 text-white' : 'bg-black/40 border-white/5 text-white/40'}`}>M</button>
-                          </div>
-                        </div>
-                        <div className="flex-1 h-32 relative bg-black/40 rounded-2xl flex items-center px-3 overflow-hidden">
-                          <div className="flex items-end justify-center gap-[2px] w-full h-16">
-                            {Array.from({length: 12}).map((_, i) => (
-                              <div key={i} className={`w-1 rounded-full bg-${stem.color} transition-all`} style={{ height: `${isVisualActive ? (Math.random() * 80 + 20) : 5}%`, opacity: active ? 0.6 : 0.05 }} />
-                            ))}
-                          </div>
-                        </div>
-                        <div className="space-y-3">
-                          <div className="flex justify-between text-[9px] mono text-white/40">
-                            <span>Gain</span>
-                            <span>{stem.volume}%</span>
-                          </div>
-                          <input type="range" min="0" max="100" value={stem.volume} onChange={(e) => setStems(stems.map(s => s.id === stem.id ? { ...s, volume: parseInt(e.target.value) } : s))} className={`w-full h-1 bg-white/5 accent-${stem.color}`} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <GuitarTuner />
-              )}
+                <button onClick={() => alert('Multi-track archive exported.')} className="bg-white text-black px-4 py-1 rounded text-[9px] mono font-black uppercase hover:opacity-80">Export Session</button>
+              </div>
             </div>
           </div>
-        )}
-      </section>
+        ) : activeModule === 'GENERATOR' ? (
+          <div className="max-w-3xl mx-auto w-full py-20 space-y-12 h-full overflow-y-auto custom-scrollbar px-8">
+            <div className="text-center space-y-4">
+              <h3 className="text-5xl font-black tracking-tighter uppercase italic">Neural Synthesis</h3>
+              <p className="text-white/40 italic">Construct a multi-track DAW project from pure latent intent.</p>
+            </div>
+            <div className="bg-white/[0.03] border border-white/10 p-10 rounded-[3rem] space-y-8 relative overflow-hidden">
+               <div className="grid grid-cols-2 gap-8">
+                  <div className="space-y-2">
+                    <label className="text-[10px] mono text-white/40 uppercase tracking-widest">Genre Axis</label>
+                    <input type="text" value={genGenre} onChange={(e) => setGenGenre(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-5 py-3 text-sm focus:border-white/40 outline-none" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] mono text-white/40 uppercase tracking-widest">Emotional Mood</label>
+                    <input type="text" value={genMood} onChange={(e) => setGenMood(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-5 py-3 text-sm focus:border-white/40 outline-none" />
+                  </div>
+               </div>
+               <div className="space-y-2">
+                  <label className="text-[10px] mono text-white/40 uppercase tracking-widest">Instruments (CSV)</label>
+                  <textarea value={genInstruments} onChange={(e) => setGenInstruments(e.target.value)} rows={2} className="w-full bg-black border border-white/10 rounded-xl px-5 py-3 text-sm focus:border-white/40 outline-none resize-none" />
+               </div>
+               <button onClick={handleGenerateAISong} disabled={isGenerating} className="w-full py-6 bg-white text-black font-black uppercase text-xs tracking-[0.3em] rounded-2xl hover:bg-zinc-200 transition-all shadow-2xl">
+                 {isGenerating ? 'Synthesizing...' : 'Initialize DAW Project'}
+               </button>
+            </div>
+          </div>
+        ) : activeModule === 'EXPLORER' ? (
+          <div className="max-w-4xl mx-auto w-full py-20 space-y-12 h-full overflow-y-auto custom-scrollbar px-8">
+             <div className="text-center space-y-4">
+                <h3 className="text-5xl font-black tracking-tighter uppercase italic">Style Explorer</h3>
+                <p className="text-white/40 italic">Inject new instrument layers and remap your session soul.</p>
+             </div>
+             <div className="bg-white/[0.03] border border-white/10 p-10 rounded-[3rem] space-y-10">
+                <div className="grid grid-cols-2 gap-8">
+                  <div className="space-y-3">
+                    <label className="text-[10px] mono text-white/40 uppercase tracking-widest">New Genre</label>
+                    <input type="text" value={remapGenre} onChange={(e) => setRemapGenre(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-5 py-4 text-xl font-bold focus:border-white/40 outline-none" />
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-[10px] mono text-white/40 uppercase tracking-widest">New Mood</label>
+                    <input type="text" value={remapMood} onChange={(e) => setRemapMood(e.target.value)} className="w-full bg-black border border-white/10 rounded-xl px-5 py-4 text-xl font-bold focus:border-white/40 outline-none" />
+                  </div>
+                </div>
+                <button onClick={handleNeuralRemap} disabled={isRemapping} className="w-full py-6 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-black uppercase text-xs tracking-[0.4em] rounded-2xl">
+                  {isRemapping ? 'Remapping Latent Space...' : 'Execute Neural Transformation'}
+                </button>
+             </div>
+          </div>
+        ) : activeModule === 'KARAOKE' ? (
+          <div className="h-full bg-black p-12 flex flex-col items-center justify-center relative">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500/20 to-transparent" />
+            <div className="w-full flex-1 overflow-y-auto custom-scrollbar-hidden py-32 flex flex-col gap-12 mask-fade text-center">
+              {metadata?.lyrics?.map((line, idx) => (
+                <h4 
+                  key={idx} 
+                  onClick={() => jumpToTime(line.time)}
+                  className={`text-4xl lg:text-7xl font-black italic tracking-tighter transition-all duration-700 cursor-pointer ${idx === currentLyricIndex ? 'text-white scale-110 opacity-100' : 'text-white/10 scale-90 blur-[1px]'}`}
+                >
+                  {line.text}
+                </h4>
+              ))}
+              {!metadata?.lyrics && <p className="text-6xl font-black italic opacity-10">NO_LYRICS_SYNCED</p>}
+            </div>
+            <style>{`.mask-fade { mask-image: linear-gradient(to bottom, transparent, black 40%, black 60%, transparent); }`}</style>
+          </div>
+        ) : activeModule === 'TUNER' ? (
+          <div className="p-10 h-full overflow-y-auto"><GuitarTuner /></div>
+        ) : null}
+      </div>
+
+      {isProcessing && (
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-2xl z-[100] flex flex-col items-center justify-center p-10 space-y-12">
+           <div className="w-full max-w-2xl space-y-6">
+              <div className="flex justify-between text-[10px] mono uppercase text-white/60 tracking-[0.4em]">
+                 <span>{processingStatus || 'Initializing Pipeline'}</span>
+                 <span>{processingProgress}%</span>
+              </div>
+              <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/10">
+                 <div className="h-full bg-gradient-to-r from-emerald-500 via-blue-500 to-purple-500 animate-pulse transition-all duration-300" style={{ width: `${processingProgress}%` }} />
+              </div>
+              <div className="h-32 bg-black/40 rounded-2xl border border-white/5 p-6 overflow-hidden font-mono text-[10px] text-emerald-500/80 italic space-y-1">
+                 {processingLog.map((log, i) => <div key={i} className="animate-in fade-in slide-in-from-left-2 opacity-60">>> {log}</div>)}
+                 <div ref={logEndRef} />
+              </div>
+           </div>
+        </div>
+      )}
 
       <style>{`
-        input[type='range'] {
-          -webkit-appearance: none;
-          background: rgba(255,255,255,0.05);
-          height: 4px;
-          border-radius: 2px;
-        }
-        input[type='range']::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          width: 12px;
-          height: 12px;
-          background: white;
-          border-radius: 50%;
-          cursor: pointer;
-        }
+        input[type='range'] { -webkit-appearance: none; background: rgba(255,255,255,0.05); height: 4px; border-radius: 2px; }
+        input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: white; border-radius: 50%; cursor: pointer; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
         .custom-scrollbar-hidden::-webkit-scrollbar { display: none; }
-        .custom-scrollbar-hidden { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
     </div>
   );

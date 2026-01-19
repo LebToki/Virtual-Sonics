@@ -10,6 +10,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ currentView, setView }) => {
   const navItems = [
     { id: AppView.LAB, label: 'Audio Lab', icon: '◈' },
+    { id: AppView.LIVE, label: 'Neural Chat', icon: '◎' },
     { id: AppView.ARCHITECT, label: 'Architect', icon: '⧇' },
     { id: AppView.COVER_ART, label: 'Cover Art', icon: '▣' },
     { id: AppView.TRANSCRIBE, label: 'Lexicon', icon: '◰' },
