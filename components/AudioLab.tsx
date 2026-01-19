@@ -235,7 +235,7 @@ const AudioLab: React.FC = () => {
 
   const finishProcessing = () => {
     setMetadata({ 
-      bpm: 124, key: 'Bm', chords: ['Bm', 'G', 'D', 'A'],
+      bpm: 124, key: 'Bm', chords: ['Bm', 'G', 'D', 'A', 'Em7', 'F#m'],
       lyrics: [
         { time: 5, text: "Spectral isolation complete" },
         { time: 12, text: "Multitrack reconstruction active" },
@@ -352,25 +352,33 @@ const AudioLab: React.FC = () => {
         {/* MIXER BAR / SIDEBAR CONTROLS */}
         <div className="lg:col-span-3 space-y-6 overflow-y-auto custom-scrollbar pr-2">
           
-          {/* NEURAL FINGERPRINT SECTION - KEY AND BPM FINDER */}
+          {/* SPECTRAL IDENTITY - KEY AND BPM FINDER */}
           {metadata && songFile && (
-            <div className="bg-white/5 border border-white/10 p-6 rounded-[2rem] space-y-4 animate-in fade-in duration-500">
+            <div className="bg-white/5 border border-white/10 p-6 rounded-[2rem] space-y-4 animate-in fade-in duration-500 group">
               <div className="flex justify-between items-center px-2">
-                <h4 className="text-[10px] mono text-white/40 uppercase tracking-[0.2em]">Neural Fingerprint</h4>
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+                <h4 className="text-[10px] mono text-white/40 uppercase tracking-[0.2em]">Spectral Identity</h4>
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-4 bg-black/40 border border-white/5 rounded-2xl flex flex-col items-center justify-center text-center">
-                  <p className="text-[7px] mono text-white/30 uppercase mb-1">Detected Key</p>
-                  <p className="text-2xl font-black text-emerald-400 italic">{metadata.key}</p>
+              <div className="space-y-3">
+                <div className="p-4 bg-black/40 border border-white/5 rounded-2xl relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-2 opacity-10 text-[40px] font-black italic select-none">{metadata.key}</div>
+                  <p className="text-[7px] mono text-white/30 uppercase mb-1 relative z-10">Neural Key Detection</p>
+                  <p className="text-3xl font-black text-emerald-400 italic relative z-10 drop-shadow-[0_0_10px_rgba(52,211,153,0.3)]">{metadata.key}</p>
                 </div>
-                <div className="p-4 bg-black/40 border border-white/5 rounded-2xl flex flex-col items-center justify-center text-center">
-                  <p className="text-[7px] mono text-white/30 uppercase mb-1">Native Tempo</p>
-                  <p className="text-2xl font-black text-blue-400 italic">{metadata.bpm}</p>
+                <div className="p-4 bg-black/40 border border-white/5 rounded-2xl flex justify-between items-center">
+                  <div>
+                    <p className="text-[7px] mono text-white/30 uppercase">Found Tempo</p>
+                    <p className="text-xl font-black text-blue-400 italic">{metadata.bpm} BPM</p>
+                  </div>
+                  <div className="h-8 w-px bg-white/10" />
+                  <div className="text-right">
+                    <p className="text-[7px] mono text-white/30 uppercase">Time Sig</p>
+                    <p className="text-xl font-black text-white italic">4/4</p>
+                  </div>
                 </div>
               </div>
-              <div className="p-3 bg-black/20 border border-white/5 rounded-xl text-center">
-                 <p className="text-[8px] mono text-white/20 uppercase tracking-widest">Scale Mapping Complete</p>
+              <div className="p-3 bg-white/5 border border-white/5 rounded-xl text-center">
+                 <p className="text-[8px] mono text-white/20 uppercase tracking-widest">Harmonic Map Resolved</p>
               </div>
             </div>
           )}
@@ -477,6 +485,31 @@ const AudioLab: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {/* MASTER ANALYSIS TRACK - KEY DISPLAY */}
+              {metadata && (
+                <div className="flex h-12 border-b border-white/10 bg-white/[0.02] transition-all group/analysis">
+                  <div className="w-72 border-r border-white/10 p-4 py-3 flex items-center gap-2 bg-emerald-500/5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                    <span className="text-[9px] mono text-emerald-400 font-bold uppercase tracking-widest">Harmonic Track</span>
+                    <span className="ml-auto text-[10px] font-black italic text-emerald-300">{metadata.key}</span>
+                  </div>
+                  <div className="flex-1 relative overflow-hidden bg-black/40">
+                    <div className="absolute inset-0 flex items-center px-8" style={{ width: `${100 * zoom}%` }}>
+                      {metadata.chords.map((chord, i) => (
+                        <div 
+                          key={i} 
+                          className="flex flex-col items-center justify-center border-l border-white/10 h-full px-12 group-hover/analysis:bg-white/[0.02] transition-colors cursor-pointer"
+                          onClick={() => jumpToTime(i * (trackDuration / metadata.chords.length))}
+                        >
+                          <span className="text-[11px] font-black mono text-white/40 group-hover/analysis:text-white transition-colors">{chord}</span>
+                          <div className="w-1 h-1 rounded-full bg-white/10 mt-1" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* TRACKS AREA */}
               <div className="flex-1 overflow-y-auto custom-scrollbar relative">
