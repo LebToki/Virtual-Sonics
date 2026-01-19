@@ -253,12 +253,12 @@ const LiveSession: React.FC<LiveSessionProps> = ({ onSelectKey, isKeyActive }) =
             <div className="space-y-4">
               <label className="text-[10px] mono text-white/40 uppercase tracking-widest">Neural Voice Interface</label>
               <div className="grid grid-cols-2 gap-2">
-                {['Zephyr', 'Puck', 'Kore', 'Fenrir'].map(v => (
+                {['Zephyr', 'Puck', 'Kore', 'Fenrir', 'Charon'].map(v => (
                   <button
                     key={v}
                     onClick={() => setVoice(v)}
                     disabled={isActive}
-                    className={`py-3 rounded-xl text-[10px] mono font-bold border transition-all ${voice === v ? 'bg-white text-black border-white' : 'text-white/40 border-white/10 hover:border-white/30'}`}
+                    className={`py-3 rounded-xl text-[10px] mono font-bold border transition-all ${voice === v ? 'bg-white text-black border-white shadow-lg shadow-white/5' : 'text-white/40 border-white/10 hover:border-white/30'}`}
                   >
                     {v}
                   </button>

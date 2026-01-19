@@ -295,6 +295,12 @@ const AudioLab: React.FC = () => {
     return metadata.lyrics.findIndex((l, i) => l.time <= time && (metadata.lyrics![i+1]?.time > time || i === metadata.lyrics!.length - 1));
   }, [metadata, playbackProgress]);
 
+  // Derived Scale Info based on Key
+  const getScaleNotes = (key: string) => {
+    const notes = ["B", "C#", "D", "E", "F#", "G", "A"]; // Hardcoded for Bm demo
+    return notes;
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 h-full flex flex-col pb-10">
       {/* DAW MASTER BAR */}
@@ -352,33 +358,39 @@ const AudioLab: React.FC = () => {
         {/* MIXER BAR / SIDEBAR CONTROLS */}
         <div className="lg:col-span-3 space-y-6 overflow-y-auto custom-scrollbar pr-2">
           
-          {/* SPECTRAL IDENTITY - KEY AND BPM FINDER */}
+          {/* HARMONIC PROFILE - KEY DISPLAY */}
           {metadata && songFile && (
-            <div className="bg-white/5 border border-white/10 p-6 rounded-[2rem] space-y-4 animate-in fade-in duration-500 group">
-              <div className="flex justify-between items-center px-2">
-                <h4 className="text-[10px] mono text-white/40 uppercase tracking-[0.2em]">Spectral Identity</h4>
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse" />
+            <div className="bg-white/5 border border-white/10 p-6 rounded-[2rem] space-y-4 animate-in fade-in duration-500 group relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4 opacity-5 text-4xl font-black italic select-none">{metadata.key}</div>
+              <div className="flex justify-between items-center px-1">
+                <h4 className="text-[10px] mono text-white/40 uppercase tracking-[0.2em]">Harmonic Profile</h4>
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
               </div>
-              <div className="space-y-3">
-                <div className="p-4 bg-black/40 border border-white/5 rounded-2xl relative overflow-hidden">
-                  <div className="absolute top-0 right-0 p-2 opacity-10 text-[40px] font-black italic select-none">{metadata.key}</div>
-                  <p className="text-[7px] mono text-white/30 uppercase mb-1 relative z-10">Neural Key Detection</p>
-                  <p className="text-3xl font-black text-emerald-400 italic relative z-10 drop-shadow-[0_0_10px_rgba(52,211,153,0.3)]">{metadata.key}</p>
-                </div>
-                <div className="p-4 bg-black/40 border border-white/5 rounded-2xl flex justify-between items-center">
-                  <div>
-                    <p className="text-[7px] mono text-white/30 uppercase">Found Tempo</p>
-                    <p className="text-xl font-black text-blue-400 italic">{metadata.bpm} BPM</p>
-                  </div>
-                  <div className="h-8 w-px bg-white/10" />
-                  <div className="text-right">
-                    <p className="text-[7px] mono text-white/30 uppercase">Time Sig</p>
-                    <p className="text-xl font-black text-white italic">4/4</p>
+              <div className="space-y-4">
+                <div className="bg-black/40 border border-white/5 p-4 rounded-2xl">
+                  <p className="text-[7px] mono text-white/30 uppercase mb-2">Identified Key</p>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-black text-emerald-400 italic tracking-tighter drop-shadow-[0_0_15px_rgba(52,211,153,0.3)]">{metadata.key}</span>
+                    <span className="text-[10px] mono text-white/40 uppercase italic">{metadata.key.includes('m') ? 'Minor Scale' : 'Major Scale'}</span>
                   </div>
                 </div>
-              </div>
-              <div className="p-3 bg-white/5 border border-white/5 rounded-xl text-center">
-                 <p className="text-[8px] mono text-white/20 uppercase tracking-widest">Harmonic Map Resolved</p>
+
+                <div className="bg-black/40 border border-white/5 p-4 rounded-2xl">
+                  <p className="text-[7px] mono text-white/30 uppercase mb-3">Scale Notes</p>
+                  <div className="flex justify-between gap-1">
+                    {getScaleNotes(metadata.key).map((note, i) => (
+                      <div key={i} className="flex flex-col items-center gap-1">
+                        <span className="text-[10px] font-bold text-white/80">{note}</span>
+                        <div className="w-1 h-1 rounded-full bg-white/10" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
+                  <p className="text-[7px] mono text-emerald-500/40 uppercase mb-1">Sonic Profile</p>
+                  <p className="text-[11px] font-medium text-emerald-300 italic">Nocturnal, moody, and intense. Ideal for ambient textures or synth-wave foundations.</p>
+                </div>
               </div>
             </div>
           )}
