@@ -1,0 +1,8 @@
+{
+  "name": "VIRTUAL SONICS | The Viral Product Architect",
+  "description": "A high-end speculative design studio and audio laboratory for creating viral product concepts and advanced multi-track isolation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
